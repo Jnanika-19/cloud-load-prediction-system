@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cloud Dashboard</title>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial;
+            background: #0f172a;
+            color: white;
+        }
+
+        .main {
+            display: flex;
+        }
+
+        .sidebar {
+            width: 200px;
+            background: #1e293b;
+            padding: 20px;
+            height: 100vh;
+        }
+
+        .sidebar h2 {
+            color: #38bdf8;
+        }
+
+        .sidebar ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .sidebar li {
+            padding: 10px;
+            cursor: pointer;
+        }
+
+        .sidebar li:hover {
+            background: #334155;
+        }
+
+        .content {
+            flex: 1;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .cards {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 10px;
+            flex: 1;
+        }
+
+        .progress-box {
+            margin-top: 20px;
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        .progress {
+            background: #334155;
+            height: 20px;
+            border-radius: 10px;
+        }
+
+        .bar {
+            height: 20px;
+            background: #38bdf8;
+            width: 0%;
+            border-radius: 10px;
+        }
+
+        .data-box {
+            display: none;
+            margin-bottom: 20px;
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        input {
+            padding: 8px;
+            width: 60%;
+        }
+
+        button {
+            padding: 8px 12px;
+            background: #38bdf8;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+
+        canvas {
+            margin-top: 20px;
+        }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+
+<div class="main">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h2>☁ CloudPredict</h2>
+        <ul>
+            <li onclick="showSection('dashboard')">Dashboard</li>
+            <li onclick="showSection('data')">Add Data</li>
+        </ul>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+
+        <!-- Data Section -->
+        <div id="dataSection" class="data-box">
+            <h3>Add Cloud Usage Data</h3>
+            <input type="text" id="dataInput" placeholder="2,3,5">
+            <button onclick="addData()">Save Data</button>
+        </div>
+
+        <div class="header">
+            <h1>Storage Dashboard</h1>
+            <button onclick="predict()">+ Predict</button>
+        </div>
+
+        <!-- Cards -->
+        <div class="cards">
+            <div class="card">
+                <p>Total Used</p>
+                <h2 id="used">0 GB</h2>
+            </div>
+
+            <div class="card">
+                <p>Remaining</p>
+                <h2 id="remaining">0 GB</h2>
+            </div>
+
+            <div class="card">
+                <p>Growth</p>
+                <h2 id="growth">0 GB/day</h2>
+            </div>
+
+            <div class="card">
+                <p>Estimated Full</p>
+                <h2 id="date">--</h2>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="progress-box">
+            <h3>Usage</h3>
+            <div class="progress">
+                <div class="bar" id="bar"></div>
+            </div>
+            <p>Limit: <span id="limit">1000</span> GB</p>
+        </div>
+
+        <!-- Chart -->
+        <canvas id="chart"></canvas>
+
+    </div>
+</div>
+
+<script>
+
+let loads = [];
+let chart;
+const storageLimit = 100;
+
+// Show section
+function showSection(section) {
+    const dataBox = document.getElementById("dataSection");
+
+    dataBox.style.display = "none";
+
+    if (section === "data") {
+        dataBox.style.display = "block";
+    }
+}
+
+// Add data
+function addData() {
+
+    let input = document.getElementById("dataInput").value;
+
+    if (!input) {
+        alert("Enter data!");
+        return;
+    }
+
+    loads = input.split(",").map(x => Number(x.trim()));
+
+    if (loads.some(isNaN)) {
+        alert("Invalid input! Use numbers only (e.g. 2,3,5)");
+        loads = [];
+        return;
+    }
+
+    alert("Data Added Successfully!");
+}
+
+// Predict
+function predict() {
+
+    if (loads.length === 0) {
+        alert("Please add data first!");
+        return;
+    }
+
+    fetch("/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loads: loads })
+    })
+    .then(async res => {
+        if (!res.ok) {
+            const message = await res.text();
+            throw new Error(message || "Server error");
+        }
+        return res.json();
+    })
+    .then(data => {
+
+        let growth = typeof data === "number" ? data : data.value;
+
+        let used = loads.reduce((a,b)=>a+b,0);
+        let total = storageLimit;
+        let remaining = total - used;
+
+        document.getElementById("used").innerText = used + " GB";
+        document.getElementById("remaining").innerText = remaining.toFixed(2) + " GB";
+        document.getElementById("growth").innerText = growth.toFixed(2) + " GB/day";
+
+        let days = growth > 0 ? remaining / growth : 0;
+
+        let future = new Date();
+        future.setDate(future.getDate() + Math.round(days));
+
+        document.getElementById("date").innerText = future.toDateString();
+
+        let percent = Math.min((used / total) * 100, 100);
+        document.getElementById("bar").style.width = percent + "%";
+
+        drawChart(loads, growth);
+    })
+    .catch((err) => {
+        console.error(err);
+        alert("Prediction failed. Start the Spring Boot app and open http://localhost:8080/");
+    });
+}
+
+// Draw chart
+function drawChart(loads, predicted) {
+
+    const ctx = document.getElementById("chart").getContext("2d");
+
+    if (chart) chart.destroy();
+
+    chart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: loads.map((_,i)=>"Day "+(i+1)),
+            datasets: [
+                {
+                    label: "Usage",
+                    data: loads,
+                    borderColor: "#00f2fe"
+                },
+                {
+                    label: "Prediction",
+                    data: Array(loads.length).fill(predicted),
+                    borderColor: "red",
+                    borderDash: [5,5]
+                }
+            ]
+        }
+    });
+}
+
+</script>
+
+</body>
+</html>
